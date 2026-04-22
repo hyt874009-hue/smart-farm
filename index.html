@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>智慧农业远程控制台</title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f7f9;
+      margin: 0;
+      padding: 16px;
+    }
+    .container {
+      max-width: 1100px;
+      margin: auto;
+    }
+    h1 {
+      text-align: center;
+      margin: 8px 0 16px;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 14px;
+    }
+    .panel {
+      background: #fff;
+      border-radius: 14px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+      padding: 16px;
+    }
+    .section-title {
+      font-size: 18px;
+      font-weight: bold;
+      margin-bottom: 12px;
+    }
+    .status-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .card {
+      background: #f9fbfc;
+      border-radius: 10px;
+      padding: 12px;
+      border-left: 5px solid #4caf50;
+      font-size: 15px;
+      word-break: break-word;
+    }
+    .control-group {
+      margin-bottom: 18px;
+    }
+    .control-group h3 {
+      margin: 0 0 10px 0;
+      font-size: 16px;
+    }
+    .btn-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    button {
+      padding: 12px 10px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 15px;
+      font-weight: bold;
+    }
+    .on { background: #4caf50; color: white; }
+    .off { background: #f44336; color: white; }
+    .mode { background: #2196f3; color: white; }
+    .info { background: #ff9800; color: white; }
+    .disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .status-badge {
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-weight: bold;
+      color: white;
+      background: #999;
+    }
+    .online { background: #4caf50; }
+    .offline { background: #f44336; }
+    .event-box {
+      max-height: 280px;
+      overflow-y: auto;
+      background: #f9fbfc;
+      border-radius: 10px;
+      padding: 10px;
+      border-left: 5px solid #ff9800;
+      white-space: pre-wrap;
+      font-size: 14px;
+    }
+    .camera-link {
+      display: inline-block;
+      margin-top: 6px;
+      color: #2196f3;
+      font-weight: bold;
+      text-decoration: none;
+    }
+    .hint {
+      color: #666;
+      font-size: 13px;
+      margin-top: 8px;
+    }
+    @media (max-width: 768px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+      .status-grid, .btn-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>智慧农业远程控制台</h1>
+
+  <div class="topbar">
+    <div id="brokerStatus" class="status-badge offline">MQTT 未连接</div>
+    <div class="hint">这是远程页面，控制通过 HiveMQ Cloud 下发</div>
+  </div>
+
+  <div class="layout">
+    <!-- 左边：状态 -->
+    <div class="panel">
+      <div class="section-title">设备状态</div>
+      <div class="status-grid">
+        <div class="card"><b>土壤湿度</b><br><span id="soil">--</span>%</div>
+        <div class="card"><b>土壤原始值</b><br><span id="soilRaw">--</span></div>
+        <div class="card"><b>空气温度</b><br><span id="temp">--</span> ℃</div>
+        <div class="card"><b>空气湿度</b><br><span id="humi">--</span>%</div>
+        <div class="card"><b>光照强度</b><br><span id="lux">--</span> lux</div>
+        <div class="card"><b>水泵状态</b><br><span id="pump">--</span></div>
+        <div class="card"><b>灌溉模式</b><br><span id="mode">--</span></div>
+        <div class="card"><b>动态开泵阈值</b><br><span id="startThreshold">--</span>%</div>
+        <div class="card"><b>连续低湿计数</b><br><span id="lowCount">--</span></div>
+        <div class="card"><b>上次浇水时长</b><br><span id="runDuration">--</span> ms</div>
+        <div class="card"><b>驱鸟模式</b><br><span id="birdMode">--</span></div>
+        <div class="card"><b>驱鸟状态</b><br><span id="birdState">--</span></div>
+        <div class="card"><b>灯光输出</b><br><span id="birdLight">--</span></div>
+        <div class="card"><b>声音输出</b><br><span id="birdSound">--</span></div>
+        <div class="card"><b>雷达状态</b><br><span id="radar">--</span></div>
+        <div class="card">
+          <b>摄像头</b><br>
+          <a class="camera-link" href="http://172.20.10.2" target="_blank">打开实时画面</a>
+        </div>
+      </div>
+
+      <div class="section-title" style="margin-top:16px;">事件日志</div>
+      <div id="eventBox" class="event-box">等待事件...</div>
+    </div>
+
+    <!-- 右边：控制 -->
+    <div class="panel">
+      <div class="section-title">远程控制</div>
+
+      <div class="control-group">
+        <h3>灌溉模式</h3>
+        <div class="btn-grid">
+          <button class="mode" onclick="setIrrigationMode('auto')">自动模式</button>
+          <button class="mode" onclick="setIrrigationMode('manual')">手动模式</button>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <h3>水泵控制</h3>
+        <div class="btn-grid">
+          <button id="pumpBtn" onclick="togglePump()">加载中...</button>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <h3>驱鸟模式</h3>
+        <div class="btn-grid">
+          <button class="mode" onclick="setBirdMode('auto')">自动驱鸟</button>
+          <button class="mode" onclick="setBirdMode('manual')">手动驱鸟</button>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <h3>灯光控制</h3>
+        <div class="btn-grid">
+          <button id="lightBtn" onclick="toggleLight()">加载中...</button>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <h3>声音控制</h3>
+        <div class="btn-grid">
+          <button id="soundBtn" onclick="toggleSound()">加载中...</button>
+        </div>
+      </div>
+
+      <div class="hint">
+        提示：水泵远程开关仅在“灌溉手动模式”下有效；灯光和声音远程开关仅在“驱鸟手动模式”下有效。
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ===== 你的 HiveMQ 配置 =====
+  const MQTT_BROKER = 'wss://02d49231c6e240ba8d5c57f9fcceb8c1.s1.eu.hivemq.cloud:8884/mqtt';
+  const MQTT_USERNAME = 'farm_user';
+  const MQTT_PASSWORD = 'Thy12345678';
+
+  // ===== 主题 =====
+  const TOPIC_STATE = 'farm/state';
+  const TOPIC_EVENT = 'farm/event';
+  const TOPIC_CMD   = 'farm/cmd';
+
+  let mqttClient = null;
+
+  let latestState = {
+    soil: '--',
+    soilRaw: '--',
+    temp: '--',
+    humi: '--',
+    lux: '--',
+    pump: false,
+    autoMode: true,
+    dynamicStartThreshold: '--',
+    lowMoistureCount: '--',
+    lastPumpRunDuration: '--',
+    radar: false,
+    birdAutoMode: true,
+    birdLight: false,
+    birdSound: false,
+    birdRunState: 0
+  };
+
+  // ===== 操作防抖 / 防连点 =====
+  let actionLock = false;
+  let actionLockTimer = null;
+
+  function setActionLock(ms = 1000) {
+    actionLock = true;
+    clearTimeout(actionLockTimer);
+    actionLockTimer = setTimeout(() => {
+      actionLock = false;
+    }, ms);
+  }
+
+  function canSendAction() {
+    if (actionLock) return false;
+    setActionLock();
+    return true;
+  }
+
+  function setBrokerStatus(connected) {
+    const el = document.getElementById('brokerStatus');
+    if (connected) {
+      el.textContent = 'MQTT 已连接';
+      el.className = 'status-badge online';
+    } else {
+      el.textContent = 'MQTT 未连接';
+      el.className = 'status-badge offline';
+    }
+  }
+
+  function appendEvent(text) {
+    const box = document.getElementById('eventBox');
+    const time = new Date().toLocaleTimeString();
+    const line = `[${time}] ${text}\n`;
+    if (box.textContent === '等待事件...') {
+      box.textContent = line;
+    } else {
+      box.textContent = line + box.textContent;
+    }
+  }
+
+  function publishCommand(payload) {
+    if (!mqttClient || !mqttClient.connected) {
+      alert('MQTT 未连接');
+      return;
+    }
+    mqttClient.publish(TOPIC_CMD, payload);
+  }
+
+  // ===== UI 更新 =====
+  function updatePumpUI() {
+    const btn = document.getElementById('pumpBtn');
+    if (!btn) return;
+
+    if (latestState.autoMode) {
+      btn.textContent = latestState.pump ? '水泵运行中' : '自动模式中';
+      btn.className = 'info disabled';
+      btn.disabled = true;
+    } else {
+      btn.disabled = false;
+      if (latestState.pump) {
+        btn.textContent = '关闭水泵';
+        btn.className = 'off';
+      } else {
+        btn.textContent = '开启水泵';
+        btn.className = 'on';
+      }
+    }
+  }
+
+  function updateLightUI() {
+    const btn = document.getElementById('lightBtn');
+    if (!btn) return;
+
+    if (latestState.birdAutoMode) {
+      btn.textContent = latestState.birdLight ? '灯光运行中' : '自动模式中';
+      btn.className = 'info disabled';
+      btn.disabled = true;
+    } else {
+      btn.disabled = false;
+      if (latestState.birdLight) {
+        btn.textContent = '关闭灯光';
+        btn.className = 'off';
+      } else {
+        btn.textContent = '开启灯光';
+        btn.className = 'on';
+      }
+    }
+  }
+
+  function updateSoundUI() {
+    const btn = document.getElementById('soundBtn');
+    if (!btn) return;
+
+    if (latestState.birdAutoMode) {
+      btn.textContent = latestState.birdSound ? '声音运行中' : '自动模式中';
+      btn.className = 'info disabled';
+      btn.disabled = true;
+    } else {
+      btn.disabled = false;
+      if (latestState.birdSound) {
+        btn.textContent = '关闭声音';
+        btn.className = 'off';
+      } else {
+        btn.textContent = '开启声音';
+        btn.className = 'on';
+      }
+    }
+  }
+
+  function renderState(data) {
+  console.log('renderState 被调用', data);
+
+  latestState = {
+    ...latestState,
+    ...data,
+    birdLight: data.birdLight ?? data.birdLightOutputState ?? latestState.birdLight,
+    birdSound: data.birdSound ?? data.birdSoundOutputState ?? latestState.birdSound
+  };
+
+  console.log('latestState =', latestState);
+
+  document.getElementById('soil').textContent = latestState.soil ?? '--';
+  document.getElementById('soilRaw').textContent = latestState.soilRaw ?? '--';
+  document.getElementById('temp').textContent = latestState.temp ?? '--';
+  document.getElementById('humi').textContent = latestState.humi ?? '--';
+  document.getElementById('lux').textContent = latestState.lux ?? '--';
+
+  document.getElementById('pump').textContent = latestState.pump ? '运行中' : '已关闭';
+  document.getElementById('mode').textContent = latestState.autoMode ? '自动' : '手动';
+  document.getElementById('startThreshold').textContent = latestState.dynamicStartThreshold ?? '--';
+  document.getElementById('lowCount').textContent = latestState.lowMoistureCount ?? '--';
+  document.getElementById('runDuration').textContent = latestState.lastPumpRunDuration ?? '--';
+
+  document.getElementById('birdMode').textContent = latestState.birdAutoMode ? '自动' : '手动';
+  document.getElementById('birdLight').textContent = latestState.birdLight ? '开启' : '关闭';
+  document.getElementById('birdSound').textContent = latestState.birdSound ? '开启' : '关闭';
+
+  let birdStateText = '待机';
+  if (latestState.birdRunState === 1) birdStateText = '驱鸟中';
+  else if (latestState.birdRunState === 2) birdStateText = '冷却中';
+  document.getElementById('birdState').textContent = birdStateText;
+
+  document.getElementById('radar').textContent = latestState.radar ? '⚠️ 检测到目标' : '空闲';
+
+  updatePumpUI();
+  updateLightUI();
+  updateSoundUI();
+}
+
+  // ===== 控制函数（已优化：先更新UI，再发MQTT）=====
+  function setIrrigationMode(mode) {
+    if (!canSendAction()) return;
+
+    // 先本地更新
+    latestState.autoMode = (mode === 'auto');
+    if (latestState.autoMode) {
+      latestState.pump = false;
+    }
+    document.getElementById('mode').textContent = latestState.autoMode ? '自动' : '手动';
+    document.getElementById('pump').textContent = latestState.pump ? '运行中' : '已关闭';
+    updatePumpUI();
+
+    publishCommand(JSON.stringify({
+      type: 'mode',
+      value: mode
+    }));
+
+    appendEvent(`已发送灌溉模式切换：${mode}`);
+  }
+
+  function togglePump() {
+    if (!canSendAction()) return;
+    if (latestState.autoMode) return;
+
+    const action = latestState.pump ? 'off' : 'on';
+
+    // 先本地更新
+    latestState.pump = !latestState.pump;
+    document.getElementById('pump').textContent = latestState.pump ? '运行中' : '已关闭';
+    updatePumpUI();
+
+    publishCommand(JSON.stringify({
+      type: 'pump',
+      action: action
+    }));
+
+    appendEvent(`已发送水泵控制：${action}`);
+  }
+
+  function setBirdMode(mode) {
+    if (!canSendAction()) return;
+
+    // 先本地更新
+    latestState.birdAutoMode = (mode === 'auto');
+    if (latestState.birdAutoMode) {
+      latestState.birdLight = false;
+      latestState.birdSound = false;
+      latestState.birdRunState = 0;
+    }
+
+    document.getElementById('birdMode').textContent = latestState.birdAutoMode ? '自动' : '手动';
+    document.getElementById('birdLight').textContent = latestState.birdLight ? '开启' : '关闭';
+    document.getElementById('birdSound').textContent = latestState.birdSound ? '开启' : '关闭';
+    updateLightUI();
+    updateSoundUI();
+
+    publishCommand(JSON.stringify({
+      type: 'bird_mode',
+      value: mode
+    }));
+
+    appendEvent(`已发送驱鸟模式切换：${mode}`);
+  }
+
+  function toggleLight() {
+    if (!canSendAction()) return;
+    if (latestState.birdAutoMode) return;
+
+    const action = latestState.birdLight ? 'off' : 'on';
+
+    // 先本地更新
+    latestState.birdLight = !latestState.birdLight;
+    document.getElementById('birdLight').textContent = latestState.birdLight ? '开启' : '关闭';
+    updateLightUI();
+
+    publishCommand(JSON.stringify({
+      type: 'light',
+      action: action
+    }));
+
+    appendEvent(`已发送灯光控制：${action}`);
+  }
+
+  function toggleSound() {
+    if (!canSendAction()) return;
+    if (latestState.birdAutoMode) return;
+
+    const action = latestState.birdSound ? 'off' : 'on';
+
+    // 先本地更新
+    latestState.birdSound = !latestState.birdSound;
+    document.getElementById('birdSound').textContent = latestState.birdSound ? '开启' : '关闭';
+    updateSoundUI();
+
+    publishCommand(JSON.stringify({
+      type: 'sound',
+      action: action
+    }));
+
+    appendEvent(`已发送声音控制：${action}`);
+  }
+
+  // ===== MQTT 连接 =====
+  function connectMQTT() {
+    mqttClient = mqtt.connect(MQTT_BROKER, {
+      username: MQTT_USERNAME,
+      password: MQTT_PASSWORD,
+      clientId: 'remote_web_' + Math.random().toString(16).slice(2, 8),
+      clean: true,
+      connectTimeout: 10000,
+      reconnectPeriod: 3000
+    });
+
+    mqttClient.on('connect', () => {
+      setBrokerStatus(true);
+      appendEvent('MQTT 连接成功');
+      mqttClient.subscribe(TOPIC_STATE);
+      mqttClient.subscribe(TOPIC_EVENT);
+    });
+
+    mqttClient.on('reconnect', () => {
+      setBrokerStatus(false);
+      appendEvent('MQTT 正在重连');
+    });
+
+    mqttClient.on('error', (err) => {
+      setBrokerStatus(false);
+      appendEvent('MQTT 错误: ' + err.message);
+    });
+
+    mqttClient.on('close', () => {
+      setBrokerStatus(false);
+      appendEvent('MQTT 已断开');
+    });
+
+    mqttClient.on('message', (topic, payload) => {
+  const text = payload.toString();
+
+  console.log('收到MQTT消息 topic =', topic);
+  console.log('收到MQTT消息 payload =', text);
+
+  try {
+    const data = JSON.parse(text);
+
+    if (topic === TOPIC_STATE) {
+      console.log('进入 renderState，数据 =', data);
+      renderState(data);
+      appendEvent(`收到状态更新：soil=${data.soil}, temp=${data.temp}, radar=${data.radar}`);
+    } 
+    else if (topic === TOPIC_EVENT) {
+      appendEvent(`${data.event || 'event'} - ${data.message || text}`);
+    } 
+    else {
+      appendEvent(`收到未知主题 [${topic}] ${text}`);
+    }
+  } catch (e) {
+    console.error('JSON解析失败', e);
+    appendEvent(`收到原始消息 [${topic}] ${text}`);
+  }
+});
+  }
+
+  connectMQTT();
+</script>
+</body>
+</html>
